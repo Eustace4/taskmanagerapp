@@ -20,7 +20,7 @@ TaskApp is a cross-platform productivity app built with Expo and Firebase, enabl
 ## Installation & Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/taskApp.git
+git clone https://github.com/Eustace4/taskmanagerapp.git
 cd taskApp
 npm install
 npx expo start
