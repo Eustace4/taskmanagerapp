@@ -10,17 +10,27 @@
       "supportsTablet": true
     },
     "android": {
-      
       "edgeToEdgeEnabled": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "splash": {
-  "image": "./assets/splash.png",
-  "resizeMode": "contain",
-  "backgroundColor": "#ffffff"
-}
-
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "expo": {
+      "scheme": "taskmanager",
+      "deepLinks": [
+        "taskmanager://",
+        "https://taskmanager.app"
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "7ca4f8bc-a72a-47fa-833f-a39ff94086c9"
+      }
+    }
   }
 }

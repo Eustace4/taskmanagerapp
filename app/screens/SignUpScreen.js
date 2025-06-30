@@ -8,14 +8,27 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { ThemeContext } from '../../context/ThemeContext';
+import { supabase } from '../../constants/supabaseConfig';
+import * as Notifications from 'expo-notifications';
 
 export default function SignUpScreen({ navigation }) {
   const { theme } = useContext(ThemeContext);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSignUp = () => {
+  const askNotificationPermission = async () => {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') {
+      const { status: newStatus } = await Notifications.requestPermissionsAsync();
+      if (newStatus !== 'granted') {
+        Alert.alert('Permission Denied', 'You will not receive task reminders.');
+      }
+    }
+  };
+
+  const handleSignUp = async () => {
     if (!email || !password || !displayName) {
       Alert.alert('Missing Info', 'All fields are required.');
       return;
@@ -26,15 +39,43 @@ export default function SignUpScreen({ navigation }) {
       return;
     }
 
-    console.log('Account created:', {
-      email,
-      displayName,
-      password: '[hidden]',
-    });
+    try {
+      setLoading(true);
 
-    Alert.alert('Account Created', 'Welcome aboard, ' + displayName + '!');
-    navigation.replace('Main');
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { displayName },
+        },
+      });
+
+      if (error) throw error;
+
+      const user = data.user;
+      if (!user) throw new Error('Sign-up succeeded but no user returned.');
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: user.id,
+          email: user.email,
+          displayName,
+        });
+
+      if (profileError) throw profileError;
+      
+      await askNotificationPermission(); 
+      Alert.alert('Account Created', `Welcome aboard, ${displayName}!`);
+      navigation.replace('Main');
+    } catch (err) {
+      console.error('Supabase sign-up error:', err.message);
+      Alert.alert('Sign-up Failed', err.message);
+    } finally {
+      setLoading(false);
+    }
   };
+
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -90,9 +131,10 @@ export default function SignUpScreen({ navigation }) {
 
       <TouchableOpacity
         onPress={handleSignUp}
-        style={[styles.button, { backgroundColor: '#4C9EFF' }]}
+        disabled={loading}
+        style={[styles.button, { backgroundColor: '#4C9EFF', opacity: loading ? 0.6 : 1 }]}
       >
-        <Text style={styles.buttonText}>Sign Up</Text>
+        <Text style={styles.buttonText}>{loading ? 'Creating...' : 'Sign Up'}</Text>
       </TouchableOpacity>
 
       <Text

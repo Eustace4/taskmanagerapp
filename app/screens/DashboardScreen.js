@@ -1,62 +1,109 @@
-import React, { useEffect, useState, useContext } from 'react';
+import React, { useEffect, useState, useContext, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { ThemeContext } from '../../context/ThemeContext';
 import { Calendar } from 'react-native-calendars';
+import { useFocusEffect } from '@react-navigation/native';
+import { ThemeContext } from '../../context/ThemeContext';
+import { supabase } from '../../constants/supabaseConfig';
 
 export default function DashboardScreen({ navigation }) {
-  const [greeting, setGreeting] = useState('');
-  const [tasksToday, setTasksToday] = useState(0);
-  const [firstName, setFirstName] = useState('');
-  const [markedDates, setMarkedDates] = useState({});
   const { theme } = useContext(ThemeContext);
+  const [greeting, setGreeting] = useState('');
+  const [firstName, setFirstName] = useState('Friend');
+  const [tasksToday, setTasksToday] = useState(0);
+  const [markedDates, setMarkedDates] = useState({});
+  const [tasks, setTasks] = useState([]);
 
-  const tasks = [
-    { title: 'Study React Native', dueDate: '2024-07-01' },
-    { title: 'Fix login bug', dueDate: '2024-07-03' },
-    { title: 'Team call', dueDate: '2024-07-03' },
-    { title: 'Weekend trip', dueDate: '2024-07-06' },
-  ];
+  const todayStr = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
     const hour = new Date().getHours();
-    if (hour < 12) setGreeting('Good morning');
-    else if (hour < 18) setGreeting('Good afternoon');
-    else setGreeting('Good evening');
-
-    const fullName = 'Chimaobi Uche'; // Replace with Firestore data eventually
-    const first = fullName.split(' ')[0];
-    setFirstName(first);
+    setGreeting(
+      hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+    );
   }, []);
 
+  const fetchTasksForToday = async () => {
+        try {
+          const {
+            data: { user },
+            error: userError,
+          } = await supabase.auth.getUser();
+
+          if (userError || !user) throw new Error('Not authenticated');
+
+          const { data, error } = await supabase
+            .from('tasks')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('dueDate', todayStr);
+
+          if (error) throw error;
+
+          setTasks(data || []);
+          setTasksToday(data?.length || 0);
+        } catch (err) {
+          console.error('Task fetch error:', err.message);
+          setTasks([]);
+          setTasksToday(0);
+        }
+      };
+
+  useFocusEffect(
+    useCallback(() => {
+      const fetchUserProfile = async () => {
+        try {
+          const {
+            data: { user },
+            error: userError,
+          } = await supabase.auth.getUser();
+
+          if (userError || !user) throw new Error('User not authenticated');
+
+          const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('displayName')
+            .eq('id', user.id)
+            .single();
+
+          if (profileError || !profile) throw new Error('Profile not found');
+
+          const name = profile.displayName?.split(' ')[0];
+          setFirstName(name || 'Friend');
+        } catch (err) {
+          console.error('Profile fetch error:', err.message);
+          setFirstName('Friend');
+        }
+      };
+      fetchUserProfile();
+      fetchTasksForToday();
+    }, [todayStr])
+  );
   useEffect(() => {
-    setTimeout(() => {
-      const fakeTaskCount = 3;
-      setTasksToday(fakeTaskCount);
-    }, 500);
-  }, []);
+  const unsubscribe = navigation.addListener('refreshDashboard', () => {
+    fetchTasksForToday(); // 🔁 refresh manually if event is fired
+  });
+
+  return unsubscribe;
+}, [navigation]);
+
 
   useEffect(() => {
     const markings = {};
-    tasks.forEach(task => {
-      const date = task.dueDate;
-      if (!markings[date]) {
-        markings[date] = {
-          marked: true,
-          dots: [{ color: theme.dot }],
-        };
-      } else {
-        markings[date].dots.push({ color: theme.dot });
-      }
-    });
+    if (tasks.length > 0) {
+      markings[todayStr] = {
+        marked: true,
+        dots: [{ color: theme.dot }],
+      };
+    }
     setMarkedDates(markings);
-  }, [theme]);
-
-  const todayStr = new Date().toLocaleDateString();
+  }, [tasks, theme]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <Calendar
-        onDayPress={(day) => navigation.navigate('Tasks', { selectedDate: day.dateString })}
+        onDayPress={(day) =>
+          navigation.navigate('Tasks', { selectedDate: day.dateString })
+        }
         markedDates={markedDates}
         markingType="multi-dot"
         theme={{
@@ -72,18 +119,17 @@ export default function DashboardScreen({ navigation }) {
         {greeting}, {firstName} 👋
       </Text>
       <Text style={[styles.subtitle, { color: theme.secondaryText }]}>
-        Today is {todayStr}
+        Today is {new Date().toLocaleDateString()}
       </Text>
 
       <TouchableOpacity
-        onPress={() => navigation.navigate('Tasks')}
-        style={[
-          styles.summaryBox,
-          { borderColor: theme.border },
-        ]}
+        onPress={() => navigation.navigate('Tasks', { selectedDate: todayStr })}
+        style={[styles.summaryBox, { borderColor: theme.border }]}
       >
         <Text style={[styles.summary, { color: theme.text }]}>
-          You have {tasksToday} task{tasksToday !== 1 ? 's' : ''} due today
+          {tasksToday === 0
+            ? 'You have zero tasks due today 🎉'
+            : `You have ${tasksToday} task${tasksToday !== 1 ? 's' : ''} due today`}
         </Text>
         <Text style={{ color: theme.secondaryText }}>Tap to view tasks</Text>
       </TouchableOpacity>
@@ -100,6 +146,7 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 8,
     alignItems: 'center',
+    marginTop: 16,
   },
   summary: { fontSize: 18, fontWeight: '600', marginBottom: 6 },
 });

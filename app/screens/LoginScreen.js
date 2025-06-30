@@ -8,25 +8,73 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { ThemeContext } from '../../context/ThemeContext';
+import { supabase } from '../../constants/supabaseConfig';
+import * as Notifications from 'expo-notifications';
 
 export default function LoginScreen({ navigation }) {
   const { theme } = useContext(ThemeContext);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
+  const askNotificationPermission = async () => {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') {
+      const { status: newStatus } = await Notifications.requestPermissionsAsync();
+      if (newStatus !== 'granted') {
+        Alert.alert('Permission Denied', 'You will not receive task reminders.');
+      }
+    }
+  };
+
+  const handleLogin = async () => {
     if (!email || !password) {
       Alert.alert('Missing Info', 'Please enter both email and password.');
       return;
     }
 
-    if (email === 'demo@taskapp.com' && password === '123456') {
+    try {
+      setLoading(true);
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) throw error;
+
+      await askNotificationPermission();
       Alert.alert('Welcome!', 'You are now signed in.');
       navigation.replace('Main');
-    } else {
-      Alert.alert('Login Error', 'Invalid email or password.');
+    } catch (err) {
+      console.error('Login error:', err.message);
+      Alert.alert('Login Error', err.message);
+    } finally {
+      setLoading(false);
     }
   };
+
+  const handlePasswordReset = async () => {
+    if (!email) {
+      Alert.alert('Missing Email', 'Please enter your email to reset your password.');
+      return;
+    }
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      if (error) throw error;
+
+      Alert.alert(
+        'Reset Email Sent',
+        'Check your inbox for a link to reset your password.'
+      );
+    } catch (err) {
+      console.error('Password reset error:', err.message);
+      Alert.alert('Error', err.message);
+    }
+  };
+
+  
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -67,24 +115,35 @@ export default function LoginScreen({ navigation }) {
 
       <TouchableOpacity
         onPress={handleLogin}
-        style={[styles.buttonPrimary, { backgroundColor: '#4C9EFF' }]}
+        disabled={loading}
+        style={[
+          styles.buttonPrimary,
+          { backgroundColor: '#4C9EFF', opacity: loading ? 0.6 : 1 },
+        ]}
       >
-        <Text style={styles.buttonText}>Log In</Text>
+        <Text style={styles.buttonText}>{loading ? 'Logging In...' : 'Log In'}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        onPress={() =>
-          Alert.alert('Coming Soon', 'Password reset will be available soon.')
-        }
-      >
+      <TouchableOpacity onPress={() => navigation.navigate('ResetPassword')}>
         <Text style={[styles.linkText, { color: '#4C9EFF' }]}>
           Forgot Password?
         </Text>
       </TouchableOpacity>
+      
+      //Add this after your "Forgot Password?" button in LoginScreen.js
+      {/*<TouchableOpacity 
+        onPress={() => navigation.navigate('UpdatePassword')}
+        style={[styles.buttonSecondary, { borderColor: '#FF6B6B', marginTop: 10 }]}
+      >
+        <Text style={[styles.buttonText, { color: '#FF6B6B' }]}>
+         🔧 Test: Update Password
+        </Text>
+      </TouchableOpacity>*/}
+
 
       <View style={styles.footer}>
         <Text style={{ color: theme.secondaryText }}>
-          Don't have an account?
+          Don’t have an account?
         </Text>
         <TouchableOpacity
           onPress={() => navigation.navigate('SignUp')}

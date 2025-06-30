@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useContext } from 'react';
+import React, { useContext, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,13 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { ThemeContext } from '../../context/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '../../constants/supabaseConfig';
+import { useEffect } from 'react';
+import { useNavigation } from '@react-navigation/native';
+
 
 export default function TaskListScreen({ route }) {
   const { theme } = useContext(ThemeContext);
@@ -21,48 +26,62 @@ export default function TaskListScreen({ route }) {
   const [sortPickerVisible, setSortPickerVisible] = useState(false);
   const [sortMethod, setSortMethod] = useState('dueDate');
 
-  const allTasks = [
-    {
-      id: '1',
-      title: 'Study React Native',
-      description: 'Finish tutorial and try out FlatList.',
-      dueDate: '2024-07-01',
-      priority: 'medium',
-    },
-    {
-      id: '2',
-      title: 'Fix login bug',
-      description: 'Investigate OAuth redirect issue on Android.',
-      dueDate: '2024-07-03',
-      priority: 'high',
-    },
-    {
-      id: '3',
-      title: 'Team call',
-      description: 'Discuss app launch plan with design and QA.',
-      dueDate: '2024-07-03',
-      priority: 'medium',
-    },
-    {
-      id: '4',
-      title: 'Weekend trip',
-      description: 'Book hotel and rental car.',
-      dueDate: '2024-07-06',
-      priority: 'low',
-    },
-  ];
-
   const priorityWeight = { high: 0, medium: 1, low: 2 };
 
-  useEffect(() => {
-    const selectedDate = route?.params?.selectedDate;
-    if (selectedDate) {
-      const filtered = allTasks.filter((task) => task.dueDate === selectedDate);
-      setTasksForDate(filtered);
-    } else {
-      setTasksForDate(allTasks);
+  const fetchTasksFromSupabase = async () => {
+    try {
+      const selectedDate = route?.params?.selectedDate;
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) throw new Error('User not authenticated');
+
+      let query = supabase
+        .from('tasks')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (selectedDate) {
+        query = query.eq('dueDate', selectedDate);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      setTasksForDate(data || []);
+    } catch (err) {
+      console.error('Task fetch error:', err.message);
+      Alert.alert('Error loading tasks', err.message);
     }
-  }, [route]);
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchTasksFromSupabase();
+    }, [route?.params?.selectedDate])
+  );
+
+  const navigation = useNavigation(); // 👈 this gives you the navigation object
+
+  useEffect(() => {
+  const unsubscribe = navigation.addListener('focus', () => {
+    const routes = navigation.getState().routes;
+    const dashboardRoute = routes.find(r => r.name === 'DashboardScreen');
+
+    if (dashboardRoute) {
+      navigation.dispatch({
+        ...navigation.navigate('DashboardScreen', { refresh: true }),
+      });
+    }
+  });
+
+  return unsubscribe;
+}, [navigation]);
+  
 
   const toggleComplete = (id) => {
     setCompleted((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -76,7 +95,7 @@ export default function TaskListScreen({ route }) {
   const calculateTimeLeft = (dueDateStr) => {
     const due = new Date(dueDateStr);
     const now = new Date();
-    const diff = due.getTime() - now.getTime();
+    const diff = due - now;
     if (diff <= 0) return 'Overdue';
     const minutes = Math.floor(diff / (1000 * 60));
     const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -87,6 +106,8 @@ export default function TaskListScreen({ route }) {
     if (hours >= 1) return `Due in ${hours} hour${hours > 1 ? 's' : ''}`;
     return `Due in ${minutes} minute${minutes > 1 ? 's' : ''}`;
   };
+
+  
 
   const sortedTasks = [...tasksForDate].sort((a, b) => {
     const aDone = completed[a.id];
@@ -106,19 +127,30 @@ export default function TaskListScreen({ route }) {
     return new Date(a.dueDate) - new Date(b.dueDate);
   });
 
-  const handleDelete = () => {
-    Alert.alert('Delete Task', 'Are you sure?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          setTasksForDate((prev) => prev.filter((t) => t.id !== selectedTask.id));
-          setModalVisible(false);
-        },
+  const handleDelete = async () => {
+  Alert.alert('Delete Task', 'Are you sure?', [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: 'Delete',
+      style: 'destructive',
+      onPress: async () => {
+        const { error } = await supabase
+          .from('tasks')
+          .delete()
+          .eq('id', selectedTask.id);
+
+        if (error) {
+          Alert.alert('Error deleting task', error.message);
+          return;
+        }
+
+        setTasksForDate((prev) => prev.filter((t) => t.id !== selectedTask.id));
+        setModalVisible(false);
       },
-    ]);
-  };
+    },
+  ]);
+};
+
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -140,6 +172,8 @@ export default function TaskListScreen({ route }) {
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => {
           const isDone = completed[item.id];
+          const { label: timeLeft, isOverdue } = calculateTimeLeft(item.dueTime || item.dueDate);
+
           return (
             <View style={[styles.taskBox, { borderColor: theme.border }]}>
               <View style={styles.taskRow}>
@@ -169,6 +203,14 @@ export default function TaskListScreen({ route }) {
                     {item.title}
                   </Text>
                   <Text style={{ color: theme.secondaryText }}>{item.dueDate}</Text>
+                  
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate('EditTask', { task: item })}
+                    style={{ marginTop: 6 }}
+                  >
+                    <Text style={{ color: '#4C9EFF', fontWeight: '500' }}>Edit Task</Text>
+                  </TouchableOpacity>
+
                 </TouchableOpacity>
               </View>
             </View>
@@ -186,7 +228,39 @@ export default function TaskListScreen({ route }) {
             <Text style={{ color: theme.secondaryText, marginBottom: 10 }}>
               {selectedTask?.description}
             </Text>
-            <Text style={{ color: theme.text }}>Due: {selectedTask?.dueDate}</Text>
+           <Text style={{ color: theme.text, marginTop: 8 }}>
+              Starts:{' '}
+              {selectedTask?.startTime || selectedTask?.startDate
+                ? new Date(selectedTask.startTime || selectedTask.startDate).toLocaleDateString(undefined, {
+                    weekday: 'long',
+                    month: 'short',
+                    day: 'numeric',
+                  }) +
+                  ' at ' +
+                  new Date(selectedTask.startTime || selectedTask.startDate).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : '—'}
+            </Text>
+
+            <Text style={{ color: theme.text }}>
+              Due:{' '}
+              {selectedTask?.dueTime || selectedTask?.dueDate
+                ? new Date(selectedTask.dueTime || selectedTask.dueDate).toLocaleDateString(undefined, {
+                    weekday: 'long',
+                    month: 'short',
+                    day: 'numeric',
+                  }) +
+                  ' at ' +
+                  new Date(selectedTask.dueTime || selectedTask.dueDate).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : '—'}
+            </Text>
+
+
             <Text style={{ color: theme.text }}>
               Priority: {selectedTask?.priority?.toUpperCase()}
             </Text>
@@ -233,24 +307,15 @@ export default function TaskListScreen({ route }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 16,
-  },
-  header: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
+  container: { flex: 1, padding: 16 },
+  header: { fontSize: 24, fontWeight: 'bold', marginBottom: 10 },
   sortRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
   },
-  sortLabel: {
-    fontSize: 14,
-  },
+  sortLabel: { fontSize: 14 },
   taskBox: {
     borderWidth: 1,
     borderRadius: 6,
